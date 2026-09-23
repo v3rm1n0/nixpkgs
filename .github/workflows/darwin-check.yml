@@ -23,10 +23,28 @@ jobs:
       - name: Build
         run: nix-build . -A stoat-desktop --show-trace
 
-      - name: Verify ad-hoc signature
+      # Diagnostics only, never fatal: a codesign complaint does not
+      # necessarily mean the app refuses to start, and the launch step below
+      # is the actual functional test.
+      - name: Inspect signature
+        continue-on-error: true
         run: |
-          codesign --verify --verbose=2 result/Applications/Stoat.app
-          codesign --display --verbose=4 result/Applications/Stoat.app
+          app=result/Applications/Stoat.app
+          echo "::group::bundle layout"
+          ls -la "$app/Contents"
+          ls -la "$app/Contents/_CodeSignature" || echo "no _CodeSignature directory"
+          echo "::endgroup::"
+          for target in "$app" "$app/Contents/MacOS/stoat-desktop"; do
+            echo "::group::display $target"
+            codesign --display --verbose=4 "$target" 2>&1 || true
+            echo "::endgroup::"
+            echo "::group::verify $target"
+            codesign --verify --verbose=2 "$target" 2>&1 || true
+            echo "::endgroup::"
+          done
+          echo "::group::asar integrity in Info.plist"
+          plutil -p "$app/Contents/Info.plist" | grep -iA6 integrity || echo "no ElectronAsarIntegrity key"
+          echo "::endgroup::"
 
       # The fuse flip invalidates the signature and asar integrity is enforced
       # at startup, so a launch attempt is the only way to catch that.
@@ -36,6 +54,12 @@ jobs:
           result/bin/stoat-desktop > launch.log 2>&1 &
           pid=$!
           sleep 20
-          kill $pid 2>/dev/null || true
+          if kill -0 $pid 2>/dev/null; then
+            echo "still alive after 20s"
+            kill $pid 2>/dev/null || true
+          else
+            wait $pid
+            echo "exited early with status $?"
+          fi
           echo "--- launch.log ---"
           cat launch.log
