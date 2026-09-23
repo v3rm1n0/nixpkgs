@@ -12,6 +12,8 @@
   pnpm_11,
   nodejs,
   electron_43,
+  resvg,
+  libicns,
   zip,
   nix-update-script,
 }:
@@ -39,6 +41,16 @@ stdenv.mkDerivation (finalAttrs: {
     # done by autoSignDarwinBinariesHook instead
     substituteInPlace forge.config.ts \
       --replace-fail "version: FuseVersion.V1," "version: FuseVersion.V1, resetAdHocDarwinSignature: false,"
+  ''
+  + lib.optionalString stdenv.hostPlatform.isDarwin ''
+    # Compiling the Icon Composer bundle needs actool from Xcode 26, which is
+    # unavailable in the sandbox. @electron/packager falls back to the icns
+    # variant of the same basename, so render one from the svg instead.
+    for size in 16 32 128 256 512; do
+      resvg --width "$size" --height "$size" assets/desktop/icon.svg "icon-$size.png"
+    done
+    png2icns assets/desktop/icon.icns icon-*.png
+    rm -r assets/desktop/icon.icon icon-*.png
   '';
 
   strictDeps = true;
@@ -58,6 +70,8 @@ stdenv.mkDerivation (finalAttrs: {
   ]
   ++ lib.optionals stdenv.hostPlatform.isDarwin [
     darwin.autoSignDarwinBinariesHook
+    resvg
+    libicns
   ];
 
   pnpmDeps = fetchPnpmDeps {
