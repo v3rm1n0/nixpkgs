@@ -1,0 +1,41 @@
+# Throwaway: build stoat-desktop on an Apple Silicon runner to verify the
+# darwin fix. Lives only on this branch, delete the branch when done.
+name: darwin-check
+
+on:
+  push:
+    branches: [darwin-check-stoat-desktop]
+
+jobs:
+  stoat-desktop:
+    runs-on: macos-15 # Apple Silicon, matches the arm64 fuses code path
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Free disk space
+        run: df -h /
+
+      - name: Build
+        run: nix-build . -A stoat-desktop --show-trace
+
+      - name: Verify ad-hoc signature
+        run: |
+          codesign --verify --verbose=2 result/Applications/Stoat.app
+          codesign --display --verbose=4 result/Applications/Stoat.app
+
+      # The fuse flip invalidates the signature and asar integrity is enforced
+      # at startup, so a launch attempt is the only way to catch that.
+      - name: Launch
+        continue-on-error: true
+        run: |
+          result/bin/stoat-desktop > launch.log 2>&1 &
+          pid=$!
+          sleep 20
+          kill $pid 2>/dev/null || true
+          echo "--- launch.log ---"
+          cat launch.log
